@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 #include <cstdint>
+#include <thread>
+#include <algorithm>
 
 namespace extractor {
 
@@ -15,20 +17,34 @@ static constexpr uint32_t MAX_PDF_PAGES_FOR_QR_SCAN = 10;  //  // Max 10 PDF pag
 static constexpr uint32_t MAX_PAGE_WIDTH = 3000;  // 3 KB
 static constexpr uint32_t MAX_PAGE_HEIGHT = 3000;  // 3 KB
 
-static constexpr uint32_t DEFAULT_WORKERS       = 4;
 static constexpr uint32_t DEFAULT_TIMEOUT_MS    = 5000;
 
 static constexpr uint32_t DEFAULT_LOGSIZE = 10 * 1024 * 1024; // 10 MB
 static constexpr uint32_t MIN_LOGSIZE = 1 * 1024 * 1024; // 1 MB
 static constexpr uint32_t MAX_LOGSIZE = 100 * 1024 * 1024; // 100 MB
+static constexpr uint32_t DEFAULT_LOG_MAX_FILES = 5; // 5 files
+
+static inline const std::string DEFAULT_LOG_LEVEL = "ERROR"; // Default error level
+
+static inline uint32_t getDefaultWorkerThreads()
+{
+    unsigned int cores = std::thread::hardware_concurrency();
+
+    if (cores == 0) {
+        return 2; // safe fallback
+    }
+
+    // Use ~80% of cores, minimum 1
+    return std::max(1u, static_cast<uint32_t>(cores * 0.8));
+}
 
 class ExtractorConfig {
 public:
     std::string m_socketPath;
     
     uint32_t m_maxPagesToScan;
-    uint32_t m_maxPdfSizeBytes;
-    uint32_t m_maxQrImageBytes;
+    uint32_t m_maxPdfSizeKiloBytes;
+    uint32_t m_maxQrImageKiloBytes;
     
 
     uint32_t m_workerThreads;
@@ -36,7 +52,14 @@ public:
 
     uid_t    m_allowedUid;
 
-    void validate() const;
+    uint32_t m_logSize;
+    uint32_t m_maxLogFiles;
+    bool     m_consoleOutput;
+    std::string m_logFile;
+    std::string m_logLevel;    
+
+    void validate() const;  
+
 };
 
 ExtractorConfig loadExtractorConfig(const std::string& path);

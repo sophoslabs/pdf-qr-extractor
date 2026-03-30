@@ -1,14 +1,18 @@
-#include "utils/response_utils.h"
-#include "utils/io_utils.h"
+#define ASIO_STANDALONE
+#include <asio.hpp>
 
-#include <unistd.h>
+#include "utils/response_utils.h"
+#include "utils/asio_io_utils.h"
+
 #include <iostream>
 
 namespace extractor::utils {
 
 using namespace extractor::protocol;
+using namespace extractor::asio_utils;
+using asio::local::stream_protocol;
 
-bool send_error(int fd,
+bool send_error(stream_protocol::socket& socket,
                 QrStatus status,
                 uint32_t timeoutMs)
 {
@@ -17,7 +21,9 @@ bool send_error(int fd,
         0
     };
 
-    if (!write_full(fd, &rh, sizeof(rh), timeoutMs)) {
+    if (!write_full(socket,
+                    asio::buffer(&rh, sizeof(rh)),
+                    timeoutMs)) {
         std::cerr << "[WARN] Failed to send error response\n";
         return false;
     }
@@ -25,4 +31,4 @@ bool send_error(int fd,
     return true;
 }
 
-}
+} // namespace extractor::utils

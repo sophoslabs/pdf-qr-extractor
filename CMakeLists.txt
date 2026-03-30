@@ -35,12 +35,6 @@ if(NOT BUILD_VERSION)
     set(BUILD_VERSION "${API_VERSION}")
 endif()
 
-# Generate version.h from template
-configure_file(
-    ${CMAKE_SOURCE_DIR}/include/version.h.in
-    ${CMAKE_SOURCE_DIR}/include/version.h
-    @ONLY
-)
 
 # Optional: print version info
 message(STATUS "API_VERSION: ${API_VERSION}")
@@ -121,6 +115,7 @@ target_include_directories(pdf_qr_extractor
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/third_party/stb
+        ${PROJECT_SOURCE_DIR}/third_party/asio/include
         ${POPPLER_INCLUDE_DIRS}
         ${ZXING_INCLUDE_DIRS}
 )

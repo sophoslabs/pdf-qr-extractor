@@ -24,11 +24,12 @@ Both SASI and extractor run on the same system architecture.
 
 ### Request Header
 
-| Field       | Size |    Type   |          Description             |
-|------------ |------|-----------|----------------------------------|
-| magic       | 4 B  | uint32_t  | Must equal QR_MAGIC (0x51525152) |
-| version     | 4 B  | uint32_t  | Protocol version                 |
-| pdf_size    | 4 B  | uint32_t  | Size of PDF payload in bytes     |
+| Field       | Size |    Type   |          Description            |
+|------------ |------|-----------|---------------------------------|
+| magic       | 4 B  | uint32_t  | Must equal QR_MAGIC (0x51525152)|
+| version     | 4 B  | uint32_t  | Protocol version                |
+| pdf_size    | 4 B  | uint32_t  | Size of PDF payload in bytes    |
+| rid         | 8 B  | uint64_t  | Randomized Id (rid) for logging |
 
 ## 4. Response Format
 

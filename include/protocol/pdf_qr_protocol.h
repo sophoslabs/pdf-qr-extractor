@@ -25,6 +25,7 @@ struct RequestHeader {
     uint32_t magic;
     uint32_t version;
     uint32_t pdf_size;
+    uint64_t rid;
 };
 
 struct ResponseHeader {

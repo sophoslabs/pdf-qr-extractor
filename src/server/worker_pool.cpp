@@ -31,6 +31,10 @@ void WorkerPool::shutdown()
 {
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+
+        if (m_stopping)
+            return;
+
         m_stopping = true;
     }
 
@@ -49,7 +53,8 @@ void WorkerPool::workerLoop()
 
         {
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait(lock, [&] {
+
+            m_cv.wait(lock, [this] {
                 return m_stopping || !m_tasks.empty();
             });
 
@@ -60,7 +65,11 @@ void WorkerPool::workerLoop()
             m_tasks.pop();
         }
 
-        task();
+        try {
+            task();
+        } catch (...) {
+            // TODO: replace with LOG_ERROR
+        }
     }
 }
 

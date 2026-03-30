@@ -22,7 +22,7 @@ public:
      * Extract ALL QR texts from PDF.
      * Result is newline-delimited.
      */
-    bool extract(const std::string& pdfData, std::string& outCombinedResult);
+    bool extract(const std::string& pdfData, std::string& outCombinedResult, uint64_t rid);
 
 private:
     const ExtractorConfig& m_cfg;

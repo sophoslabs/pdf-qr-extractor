@@ -1,5 +1,7 @@
 #include "processor/pdf_qr_processor.h"
 
+#include "logging/logger.h"
+
 #include <poppler-document.h>
 #include <poppler-page.h>
 #include <poppler-page-renderer.h>
@@ -50,14 +52,14 @@ PDFQRProcessor::PDFQRProcessor(const ExtractorConfig& cfg)
 {
 }
 
-bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombinedResult)
+bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombinedResult, uint64_t rid)
 {
     outCombinedResult.clear();
     std::vector<std::string> collectedQrs;
 
     // Enforce MAX_PDF_SIZE_QR
-    if (pdfData.size() > m_cfg.m_maxPdfSizeBytes) {
-        std::cerr << "[INFO] PDF exceeds max size, skipping QR scan\n";
+    if (pdfData.size() > m_cfg.m_maxPdfSizeKiloBytes) {        
+        LOG_ERROR ("PROCESSOR", "[INFO] PDF exceeds max size, skipping QR scan");
         return true;
     }
 
@@ -65,8 +67,8 @@ bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombine
 
     std::unique_ptr<poppler::document> document(poppler::document::load_from_data(&bytes));
 
-    if (!document || document->is_locked()) {
-        std::cerr << "[WARN] Unable to load PDF or PDF is locked\n";
+    if (!document || document->is_locked()) {        
+        LOG_ERROR ("PROCESSOR", "[WARN] Unable to load PDF or PDF is locked");
         return true;
     }
 
@@ -75,12 +77,8 @@ bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombine
     poppler::page_renderer renderer;
 
     // Enforce MAX_PAGE_SINGLE_PDF
-    if (totalPages > MAX_PAGE_SINGLE_PDF) {
-        std::cerr << "[INFO] PDF has "
-                  << totalPages
-                  << " pages, exceeds max pages for single pdf= "
-                  << MAX_PAGE_SINGLE_PDF
-                  << ", skipping QR scan\n";
+    if (totalPages > MAX_PAGE_SINGLE_PDF) {        
+        LOG_ERROR ("PROCESSOR",  "PDF has " + std::to_string(totalPages) + " pages, exceeds max pages for single pdf= "  + std::to_string(MAX_PAGE_SINGLE_PDF)  + ", skipping QR scan");
         return true;
     }
     
@@ -88,18 +86,17 @@ bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombine
 
     for (int i = 0; i < pagesToScan; ++i) {       
         
-        std::unique_ptr<poppler::page> page(document->create_page(i));
-
-        if (!page) {
-            std::cerr << "[WARN] Invalid page, skipping\n";
+        std::unique_ptr<poppler::page> page(document->create_page(i));        
+        LOG_INFO("PROCESSOR", "RID=" + std::to_string(rid) + " start");
+        if (!page) {           
+            LOG_ERROR ("PROCESSOR", "[WARN] Invalid page, skipping");
             continue;
         }
 
         auto rect = page->page_rect();
         if (rect.width() > MAX_PAGE_WIDTH ||
             rect.height() > MAX_PAGE_HEIGHT) {
-
-            std::cerr << "[INFO] Page dimensions exceed limits, skipping page\n";
+            LOG_ERROR ("PROCESSOR", "[INFO] Page dimensions exceed limits, skipping page");
             continue;  // page auto-freed
         }
 
@@ -107,8 +104,8 @@ bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombine
 
         if (!image.is_valid() ||
             image.width() == 0 ||
-            image.height() == 0) {
-            std::cerr << "[WARN] Rendered image invalid, skipping page\n";
+            image.height() == 0) {            
+            LOG_ERROR ("PROCESSOR", "[WARN] Rendered image invalid, skipping page");
             continue;
         }
 
@@ -116,8 +113,8 @@ bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombine
         renderPageToPng(image, pngData);
 
         if (pngData.empty() ||
-            pngData.size() > m_cfg.m_maxQrImageBytes) {
-            std::cerr << "[INFO] Rendered image exceeds QR size limit, skipping\n";
+            pngData.size() > m_cfg.m_maxQrImageKiloBytes) {            
+            LOG_ERROR ("PROCESSOR", "[INFO] Rendered image exceeds QR size limit, skipping");
             continue;
         }
 
@@ -133,7 +130,7 @@ bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombine
         outCombinedResult.append(qr);
         outCombinedResult.push_back('\n');
     }
-
+    LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) +  " PDF processed successfully (" + std::to_string(pdfData.size()) + ")  bytes");
     return true;
 }
 
@@ -155,8 +152,8 @@ std::vector<std::string> PDFQRProcessor::decodeQrFromImage(const std::vector<uns
         stbi_image_free
     );
 
-    if (!img) {
-        std::cerr << "[WARN] Failed to decode image\n";
+    if (!img) {        
+        LOG_ERROR ("PROCESSOR", "[WARN] Failed to decode image");
         return results;
     }
 

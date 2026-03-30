@@ -1,200 +1,177 @@
+#define ASIO_STANDALONE
+#include <asio.hpp>
+
 #include "server/extractor_server.h"
-#include "protocol/request_validation.h"
-#include "utils/io_utils.h"
-#include "system/shutdown.h"
+#include "core/dispatcher_factory.h"
+#include "core/messages.h"
 #include "security/security_checks.h"
+#include "system/shutdown.h"
+#include "protocol/request_validation.h"
+#include "protocol/pdf_qr_protocol.h"
 
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-#include <poll.h>
-#include <cstring>
+#include "utils/asio_io_utils.h"
+#include "utils/response_utils.h"
+#include "logging/logger.h"
+
+
 #include <iostream>
-
-using namespace extractor::protocol;
-using namespace extractor::security;
 
 namespace extractor {
 
+using asio::local::stream_protocol;
+using namespace extractor::utils;
+using namespace extractor::asio_utils;
+using namespace extractor::security;
+using namespace extractor::protocol;
+
 ExtractorServer::ExtractorServer(const ExtractorConfig& cfg)
-    : m_listenFd(-1),
-      m_cfg(cfg),
+    : m_cfg(cfg),
       m_qrProcessor(cfg),
-      m_workerPool(cfg.m_workerThreads)
+      m_workerPool(cfg.m_workerThreads),
+      m_dispatcher(createDispatcher(m_qrProcessor)),
+      m_ioContext(),
+      m_acceptor(m_ioContext)
 {
     enforceNotRoot();
     validateSocketPath(m_cfg.m_socketPath);
     validateSocketDirectory(m_cfg.m_socketPath);
     enforceSingleInstance(m_cfg.m_socketPath);
-    m_listenFd = createListenSocket();
+    setupAcceptor();
 }
 
-
-ExtractorServer::~ExtractorServer()
+void ExtractorServer::setupAcceptor()
 {
-    m_workerPool.shutdown();
-    cleanupSocket();
+    ::unlink(m_cfg.m_socketPath.c_str());
+
+    stream_protocol::endpoint ep(m_cfg.m_socketPath);
+
+    m_acceptor.open(ep.protocol());
+    m_acceptor.bind(ep);
+    m_acceptor.listen();
 }
-
-int ExtractorServer::createListenSocket()
-{
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-        throw std::runtime_error("socket() failed");
-
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, m_cfg.m_socketPath.c_str(),
-            sizeof(addr.sun_path) - 1);
-
-    unlink(m_cfg.m_socketPath.c_str());
-
-    if (bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0)
-        throw std::runtime_error(std::string("bind() failed: ") + strerror(errno));
-
-    chmod(m_cfg.m_socketPath.c_str(), 0600);
-
-    if (listen(fd, m_cfg.m_workerThreads * 2) < 0)
-        throw std::runtime_error("listen() failed");
-
-    return fd;
-}
-
-void ExtractorServer::cleanupSocket()
-{
-    if (m_listenFd >= 0) {
-        close(m_listenFd);
-        m_listenFd = -1;
-    }
-    unlink(m_cfg.m_socketPath.c_str());
-}
-
-void ExtractorServer::handleClient(int fd)
-{
-    using namespace extractor::protocol;
-
-    try {
-
-        // Verify connecting process' identity
-        verifyPeerUid(fd, m_cfg.m_allowedUid);
-
-    } catch (const std::exception& e) {
-        std::cerr << "[SECURITY] Connection rejected: "
-                  << e.what() << "\n";
-        close(fd);
-        return;
-    }
-
-    RequestHeader hdr{};
-    if (!read_full(fd, &hdr, sizeof(hdr), m_cfg.m_requestTimeoutMs)) {
-        std::cerr << "[WARN] Failed to read request header (timeout or disconnect)\n";
-        close(fd);
-        return;
-    }
-    std::cerr << "SERVER: Request header received fd= "<< fd << ", hdr= "<< hdr.pdf_size << " bytes" << std::endl;
-
-    // Protocol validation (ONLY structure/version)
-    QrStatus st = validateRequest(hdr, m_cfg);
-    if (st != QrStatus::OK) {
-        std::cerr << "[INFO] Invalid request received, status="
-                  << static_cast<uint32_t>(st) << "\n";
-
-        ResponseHeader rh{st, 0};
-        write_full(fd, &rh, sizeof(rh), m_cfg.m_requestTimeoutMs);
-        std::cerr << "SERVER: Sending response header fd= "<< fd << ", hdr= "<< rh.data_size << " bytes" << std::endl;
-        close(fd);
-        return;
-    }
-
-    // Policy / config validation (limits)
-    if (hdr.pdf_size > m_cfg.m_maxPdfSizeBytes ||
-        hdr.pdf_size == 0) {
-
-        ResponseHeader rh{QrStatus::LIMIT_EXCEEDED, 0};
-        write_full(fd, &rh, sizeof(rh), m_cfg.m_requestTimeoutMs);
-        close(fd);
-        return;
-    }
-
-    // Safe allocation AFTER validation
-    std::string pdf;
-    pdf.resize(hdr.pdf_size);
-
-    if (!read_full(fd, pdf.data(), pdf.size(), m_cfg.m_requestTimeoutMs)) {
-        std::cerr << "[WARN] Failed to read PDF payload (size=" << hdr.pdf_size << ")\n";
-        close(fd);
-        return;
-    }   
-    
-    std::cerr << "SERVER: PDF payload read fd= "<< fd << ", hdr= "<< hdr.pdf_size << " bytes" << std::endl;
-
-    // QR extraction
-    std::string qrResult;
-    bool ok = m_qrProcessor.extract(pdf, qrResult);
-    std::cerr << "PROCESSOR: Starting QR extraction fd " << fd << " \n";    
-    
-
-    if (!ok) {
-        std::cerr << "[ERROR] QR extraction failed unexpectedly\n";
-        ResponseHeader rh{QrStatus::INTERNAL_ERROR, 0};
-        write_full(fd, &rh, sizeof(rh), m_cfg.m_requestTimeoutMs);
-        close(fd);
-        return;
-    }
-
-    // Send response
-    ResponseHeader rh{
-        QrStatus::OK,
-        static_cast<uint32_t>(qrResult.size())
-    };
-
-    if (!write_full(fd, &rh, sizeof(rh), m_cfg.m_requestTimeoutMs)) {
-        std::cerr << "[WARN] Failed to write response header\n";
-        close(fd);
-        return;
-    }
-
-    if (!qrResult.empty()) {
-        if (!write_full(fd, qrResult.data(),
-                        qrResult.size(),
-                        m_cfg.m_requestTimeoutMs)) {
-            std::cerr << "[WARN] Failed to write QR result payload\n";
-            close(fd);
-            return;
-        }
-    }
-    
-    std::cerr << "SERVER: PDF payload write fd= "<< fd << ", qrResult-size= "<< qrResult.size() << " bytes" << std::endl;
-    std::cerr << "[DEBUG] Request processed successfully\n";
-    close(fd);
-}
-
 
 void ExtractorServer::run()
 {
-    while (!m_gShutdownRequested.load()) {
+    while (!m_gShutdownRequested.load())
+    {
+        stream_protocol::socket socket(m_ioContext);
 
-        pollfd pfd{m_listenFd, POLLIN, 0};
-        int rc = poll(&pfd, 1, 1000);
+        asio::error_code ec;
 
-        if (rc <= 0)
+        m_acceptor.accept(socket, ec);
+
+        if (ec)
+        {
+            if (m_gShutdownRequested.load())
+            {
+                break; // graceful exit
+            }
+            
+            LOG_ERROR ("SERVER",  std::string("[WARN] accept failed: ") + ec.message());
             continue;
+        }
 
-        int clientFd = accept(m_listenFd, nullptr, nullptr);
-        if (clientFd < 0)
-            continue;
-        std::cerr << "[DEBUG] SERVER, Client connecte, fd= " << clientFd << std::endl;
-        bool enqueued = m_workerPool.enqueue([this, clientFd]() { handleClient(clientFd); });
+       
+        if (m_gShutdownRequested.load())
+        {
+            socket.close();
+            break;
+        }
+        
+
+        auto sockPtr = std::make_shared<stream_protocol::socket>(std::move(socket));
+
+        bool enqueued = m_workerPool.enqueue(
+            [this, sockPtr]() mutable
+            {
+                handleClient(std::move(*sockPtr));
+            });
 
         if (!enqueued)
-        {
-            // Overload protection
-            close(clientFd);
+        {            
+            LOG_WARN ("SERVER", "[WARN] worker queue full, dropping connection");
+            sockPtr->close();
         }
     }
-    std::cerr << "[INFO] Shutdown requested, stopping extractor\n";
-    cleanupSocket();
 }
 
+void ExtractorServer::handleClient(stream_protocol::socket socket)
+{
+    try {
+        int fd = socket.native_handle();
+
+        verifyPeerUid(fd, m_cfg.m_allowedUid);
+
+        RequestHeader hdr{};
+
+        
+        if (!read_full(socket, asio::buffer(&hdr, sizeof(hdr)), m_cfg.m_requestTimeoutMs)) {
+            return;
+        }
+
+        uint64_t rid = hdr.rid;
+       
+        QrStatus st = validateRequest(hdr, m_cfg);
+        if (st != QrStatus::OK) {
+            send_error(socket, st, m_cfg.m_requestTimeoutMs);            
+            return;
+        }
+
+        std::string pdf(hdr.pdf_size, '\0');
+        auto s2 = std::chrono::steady_clock::now();
+        if (!read_full(socket, asio::buffer(pdf.data(), pdf.size()), m_cfg.m_requestTimeoutMs)) {
+            return;
+        }        
+        auto e2 = std::chrono::steady_clock::now();
+        LOG_ERROR("SERVER and PROCESSOR", "RID=" + std::to_string(rid) + "PROCESSOR: PDF payload read= " + std::to_string(fd) +  ", rtime_ms= " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(e2 - s2).count()) + " ms"); //to be removed
+
+        std::string qrResult;
+        auto start = std::chrono::steady_clock::now(); // to be removed
+        try {
+            JsonMessage msg("pdf", pdf);
+            qrResult = m_dispatcher.dispatch(msg, rid);
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[ERROR] Processing failed: " << e.what() << "\n"; 
+            LOG_ERROR ("SERVER",  std::string("Processing failed: ") + e.what());      
+            send_error(socket, QrStatus::INTERNAL_ERROR, m_cfg.m_requestTimeoutMs);
+            return;
+        }
+        auto end = std::chrono::steady_clock::now(); // to be removed
+        LOG_ERROR("SERVER and PROCESSOR", "RID=" + std::to_string(rid) + "Extraction finished fd= " + std::to_string(fd) +  ", time_ms= " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()) + " ms"); //to be removed
+
+        ResponseHeader rh{
+            QrStatus::OK,
+            static_cast<uint32_t>(qrResult.size())
+        };
+        
+        if (!write_full(socket,
+                        asio::buffer(&rh, sizeof(rh)),
+                        m_cfg.m_requestTimeoutMs)) {
+            return;
+        }
+        auto s1 = std::chrono::steady_clock::now(); // to be removed
+        if (!qrResult.empty()) {
+            write_full(socket, asio::buffer(qrResult.data(), qrResult.size()), m_cfg.m_requestTimeoutMs);
+        }
+        auto e1 = std::chrono::steady_clock::now();
+        LOG_ERROR("SERVER and PROCESSOR", "RID=" + std::to_string(rid) +  "PDF payload write fd= " + std::to_string(fd) +  ", wtime_ms= " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(e1 - s1).count()) + " ms"); //to be removed
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[ERROR] Connection error: " << e.what() << "\n";
+        LOG_ERROR ("SERVER", "[ERROR] Connection error: ");
+    }
 }
+
+void ExtractorServer::stop()
+{
+    m_gShutdownRequested.store(true);
+
+    asio::error_code ec;
+    m_acceptor.cancel(ec);
+    m_acceptor.close(ec);
+
+    ::unlink(m_cfg.m_socketPath.c_str());
+}
+
+} // namespace extractor

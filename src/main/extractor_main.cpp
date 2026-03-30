@@ -1,7 +1,9 @@
 #include "config/extractor_config.h"
 #include "server/extractor_server.h"
 #include "system/signal_handler.h"
-#include "version.h"
+#include "system/shutdown.h"
+#include "misc/version.h"
+#include "logging/logger.h"
 #include <iostream>
 #include <csignal>
 #include <unistd.h>
@@ -29,20 +31,27 @@ int main(int argc, char* argv[])
 
         g_socketPath = cfg.m_socketPath;
 
-        install_signal_handlers();
+        install_signal_handlers();     
+        
+        Logger::instance().init(parseLogLevel(cfg.m_logLevel), cfg.m_consoleOutput, cfg.m_logFile, cfg.m_logSize, cfg.m_maxLogFiles);
 
-        // STARTUP LOGS
+          // STARTUP LOGS
         std::cerr << "========================================" << std::endl;
         std::cerr << " PDF QR Extractor starting" << std::endl;
-        std::cerr << " Version : v1.0" << std::endl;
+        std::cerr << " Version : v1.0.0" << std::endl;
         std::cerr << " Build   : " << __DATE__ << " " << __TIME__ << std::endl;
         std::cerr << " Config  : " << configPath << std::endl;
         std::cerr << " EXTRACTOR_SOCKET_PATH : " << cfg.m_socketPath << std::endl;
         std::cerr << " WORKER_THREADS : " << cfg.m_workerThreads << std::endl;
-        std::cerr << " MAX_PDF_QR_DECODE_KB_SIZE  : " << (cfg.m_maxPdfSizeBytes / 1000) << std::endl;
+        std::cerr << " MAX_PDF_QR_DECODE_KB_SIZE  : " << (cfg.m_maxPdfSizeKiloBytes / 1000) << std::endl;
+        std::cerr << " MAX_QR_DECODE_KB_SIZE  : " << (cfg.m_maxQrImageKiloBytes / 1000) << std::endl;
         std::cerr << " MAX_PDF_PAGES_FOR_QR_SCAN : " << cfg.m_maxPagesToScan << std::endl;
-        std::cerr <<" ALLOWED_UID : " << cfg.m_allowedUid << std::endl;
-        std::cerr << "========================================" << std::endl;
+        std::cerr << " ALLOWED_UID : " << cfg.m_allowedUid << std::endl;
+        std::cerr << " CONSOLE_OUTPUT : " << cfg.m_consoleOutput << std::endl;
+        std::cerr << " LOG_SIZE : " << cfg.m_logSize << std::endl;
+        std::cerr << " LOG_FILE : " << cfg.m_logFile << std::endl;
+        std::cerr << " LOG_LEVEL : " << cfg.m_logLevel << std::endl;
+        std::cerr << "========================================" << std::endl;        
 
         // Start server
         ExtractorServer server(cfg);
@@ -50,10 +59,21 @@ int main(int argc, char* argv[])
         std::cerr << "Extractor server starting event loop" << std::endl;
         std::cerr << "Extractor started Successfully" << std::endl;
 
+        std::thread shutdownWatcher([&]()
+                                    {
+                                        while (!m_gShutdownRequested.load())
+                                        {
+                                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                        }
+
+                                        server.stop();
+                                    });
+
         server.run();
 
-        std::cerr << "Extractor shutting down cleanly"
-                  << std::endl;
+        std::cerr << "Extractor shutting down cleanly" << std::endl;
+
+        shutdownWatcher.join();
 
         return 0;
     }

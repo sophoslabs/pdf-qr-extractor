@@ -1,14 +1,15 @@
 #pragma once
 
-#include <cstdint>
+#define ASIO_STANDALONE
+#include <asio.hpp>
+
 #include "protocol/pdf_qr_protocol.h"
 
 namespace extractor::utils {
 
-/**
- * Sends an error response (status only, no payload)
- */
-bool send_error(int fd,
+using asio::local::stream_protocol;
+
+bool send_error(stream_protocol::socket& socket,
                 extractor::protocol::QrStatus status,
                 uint32_t timeoutMs);
 

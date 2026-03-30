@@ -1,9 +1,15 @@
 #pragma once
 
-#include "worker_pool.h"
+#define ASIO_STANDALONE
+#include <asio.hpp>
+
 #include "config/extractor_config.h"
 #include "processor/pdf_qr_processor.h"
+#include "server/worker_pool.h"
+#include "core/dispatcher_factory.h"
+#include "core/parser.h"
 
+#include <atomic>
 #include <string>
 
 namespace extractor {
@@ -11,29 +17,35 @@ namespace extractor {
 class ExtractorServer {
 public:
     explicit ExtractorServer(const ExtractorConfig& cfg);
-    ~ExtractorServer();
+    ~ExtractorServer() noexcept = default;
 
-    // Main accept loop
+    ExtractorServer(const ExtractorServer&) = delete;
+    ExtractorServer& operator=(const ExtractorServer&) = delete;
+
+    ExtractorServer(ExtractorServer&&) = default;
+    ExtractorServer& operator=(ExtractorServer&&) = default;
+
     void run();
+    void stop();
 
+private:   
+    void setupAcceptor();
+
+    using Socket = asio::local::stream_protocol::socket;
+    void handleClient(Socket socket);    
+   
 private:
-    // Listening socket FD
-    int m_listenFd;
 
-    // Immutable runtime configuration
     ExtractorConfig m_cfg;
 
-    // Real QR processor (poppler + stb + zxing)
     PDFQRProcessor m_qrProcessor;
 
     WorkerPool m_workerPool;
-
-    // Socket lifecycle
-    int createListenSocket();
-    void cleanupSocket();
-
-    // Handles exactly one client request synchronously
-    void handleClient(int clientFd);
+    Parser m_parser;
+    Dispatcher m_dispatcher;
+  
+    asio::io_context m_ioContext;
+    asio::local::stream_protocol::acceptor m_acceptor;    
 };
 
 } // namespace extractor
