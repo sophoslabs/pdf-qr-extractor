@@ -98,64 +98,73 @@ void ExtractorServer::run()
 void ExtractorServer::handleClient(stream_protocol::socket socket)
 {
     try {
-        int fd = socket.native_handle();
+        // Create per-request io_context
+        asio::io_context io;
+
+        // Rebind socket to this io_context
+        stream_protocol::socket sock(io);
+        sock.assign(stream_protocol(), socket.native_handle());
+        socket.release();   // VERY IMPORTANT
+
+        int fd = sock.native_handle();
 
         verifyPeerUid(fd, m_cfg.m_allowedUid);
 
         RequestHeader hdr{};
 
-        
-        if (!read_full(socket, asio::buffer(&hdr, sizeof(hdr)), m_cfg.m_requestTimeoutMs)) {
+        if (!read_full(io, sock,
+                       asio::buffer(&hdr, sizeof(hdr)),
+                       m_cfg.m_requestTimeoutMs)) {
+            LOG_ERROR("SERVER", "Header read operation failed, timeout= " + std::to_string(m_cfg.m_requestTimeoutMs)+ " milliseconds");
             return;
         }
 
         uint64_t rid = hdr.rid;
-       
+
         QrStatus st = validateRequest(hdr, m_cfg);
         if (st != QrStatus::OK) {
-            send_error(socket, st, m_cfg.m_requestTimeoutMs);            
+            send_error(io, sock, st, m_cfg.m_requestTimeoutMs);
             return;
         }
 
-        std::string pdf(hdr.pdf_size, '\0');
-        auto s2 = std::chrono::steady_clock::now();
-        if (!read_full(socket, asio::buffer(pdf.data(), pdf.size()), m_cfg.m_requestTimeoutMs)) {
+        std::string pdf(hdr.pdf_size, '\0');        
+
+        if (!read_full(io, sock,
+                       asio::buffer(pdf.data(), pdf.size()),
+                       m_cfg.m_requestTimeoutMs)) {
+            LOG_ERROR("SERVER", "PDF data read operation failed, timeout= " + std::to_string(m_cfg.m_requestTimeoutMs) + " milliseconds");
             return;
-        }        
-        auto e2 = std::chrono::steady_clock::now();
-        LOG_ERROR("SERVER and PROCESSOR", "RID=" + std::to_string(rid) + "PROCESSOR: PDF payload read= " + std::to_string(fd) +  ", rtime_ms= " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(e2 - s2).count()) + " ms"); //to be removed
+        }
+        
 
         std::string qrResult;
-        auto start = std::chrono::steady_clock::now(); // to be removed
+        
         try {
             JsonMessage msg("pdf", pdf);
             qrResult = m_dispatcher.dispatch(msg, rid);
         }
         catch (const std::exception& e) {
             std::cerr << "[ERROR] Processing failed: " << e.what() << "\n"; 
-            LOG_ERROR ("SERVER",  std::string("Processing failed: ") + e.what());      
-            send_error(socket, QrStatus::INTERNAL_ERROR, m_cfg.m_requestTimeoutMs);
+            LOG_ERROR ("SERVER",  std::string("Processing failed: ") + e.what());
+            send_error(io, socket, QrStatus::INTERNAL_ERROR, m_cfg.m_requestTimeoutMs);
             return;
         }
-        auto end = std::chrono::steady_clock::now(); // to be removed
-        LOG_ERROR("SERVER and PROCESSOR", "RID=" + std::to_string(rid) + "Extraction finished fd= " + std::to_string(fd) +  ", time_ms= " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()) + " ms"); //to be removed
-
+        
         ResponseHeader rh{
             QrStatus::OK,
             static_cast<uint32_t>(qrResult.size())
         };
         
-        if (!write_full(socket,
+        if (!write_full(io, socket,
                         asio::buffer(&rh, sizeof(rh)),
                         m_cfg.m_requestTimeoutMs)) {
             return;
         }
-        auto s1 = std::chrono::steady_clock::now(); // to be removed
+        
         if (!qrResult.empty()) {
-            write_full(socket, asio::buffer(qrResult.data(), qrResult.size()), m_cfg.m_requestTimeoutMs);
+            write_full(io, socket, asio::buffer(qrResult.data(), qrResult.size()), m_cfg.m_requestTimeoutMs);
         }
-        auto e1 = std::chrono::steady_clock::now();
-        LOG_ERROR("SERVER and PROCESSOR", "RID=" + std::to_string(rid) +  "PDF payload write fd= " + std::to_string(fd) +  ", wtime_ms= " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(e1 - s1).count()) + " ms"); //to be removed
+        
     }
     catch (const std::exception& e) {
         std::cerr << "[ERROR] Connection error: " << e.what() << "\n";

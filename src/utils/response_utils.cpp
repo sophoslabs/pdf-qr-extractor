@@ -12,7 +12,8 @@ using namespace extractor::protocol;
 using namespace extractor::asio_utils;
 using asio::local::stream_protocol;
 
-bool send_error(stream_protocol::socket& socket,
+bool send_error(asio::io_context& io,
+                stream_protocol::socket& socket,
                 QrStatus status,
                 uint32_t timeoutMs)
 {
@@ -21,7 +22,7 @@ bool send_error(stream_protocol::socket& socket,
         0
     };
 
-    if (!write_full(socket,
+    if (!write_full(io, socket,
                     asio::buffer(&rh, sizeof(rh)),
                     timeoutMs)) {
         std::cerr << "[WARN] Failed to send error response\n";

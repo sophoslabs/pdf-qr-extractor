@@ -9,7 +9,8 @@ namespace extractor::utils {
 
 using asio::local::stream_protocol;
 
-bool send_error(stream_protocol::socket& socket,
+bool send_error(asio::io_context& io,
+                stream_protocol::socket& socket,
                 extractor::protocol::QrStatus status,
                 uint32_t timeoutMs);
 
