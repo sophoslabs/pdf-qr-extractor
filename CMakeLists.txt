@@ -1,44 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(pdf_qr_extractor
-    VERSION 1.0
+    VERSION 1.0.0
     LANGUAGES CXX
 )
 
-# --------------------------------------------------
-# Version generation (Git-based)
-# --------------------------------------------------
-
-# Get latest tag (API version)
-execute_process(
-    COMMAND git describe --tags --abbrev=0
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE API_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-
-if(NOT API_VERSION)
-    set(API_VERSION "v0.0.0")
-endif()
-
-# Get detailed build version
-execute_process(
-    COMMAND git describe --tags --dirty --always
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE BUILD_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-
-if(NOT BUILD_VERSION)
-    set(BUILD_VERSION "${API_VERSION}")
-endif()
-
-
-# Optional: print version info
-message(STATUS "API_VERSION: ${API_VERSION}")
-message(STATUS "BUILD_VERSION: ${BUILD_VERSION}")
+set(API_VERSION "1.0.0")
+set(BUILD_VERSION "1.0.0")
 
 # --------------------------------------------------
 # Global settings
@@ -52,13 +20,15 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-#--------------------------------------------------
-# RPATH configuration (critical for bundled libs)
-#--------------------------------------------------
+# --------------------------------------------------
+# RPATH (portable / relocatable)
+# --------------------------------------------------
 
 set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
-set(CMAKE_SKIP_RPATH FALSE)
-set(CMAKE_SKIP_INSTALL_RPATH FALSE)
+
+# 🔥 ONLY relative path — no absolute paths
+set(CMAKE_BUILD_RPATH "$ORIGIN/../lib")
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
 
 # --------------------------------------------------
 # Compiler warnings
@@ -79,13 +49,43 @@ endif()
 # --------------------------------------------------
 
 find_package(Threads REQUIRED)
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(POPPLER REQUIRED poppler-cpp)
-pkg_check_modules(ZXING REQUIRED zxing)
 
 # --------------------------------------------------
-# Source files (Auto-discovery for src)
+# Poppler (vendored)
+# --------------------------------------------------
+
+set(POPPLER_ROOT "${PROJECT_SOURCE_DIR}/third_party/poppler")
+
+set(POPPLER_INCLUDE_DIRS
+    "${POPPLER_ROOT}/include/poppler"
+    "${POPPLER_ROOT}/include/poppler/cpp"
+)
+
+set(POPPLER_CPP_LIB "${POPPLER_ROOT}/lib/libpoppler-cpp.so")
+set(POPPLER_LIB     "${POPPLER_ROOT}/lib/libpoppler.so")
+
+if(NOT EXISTS "${POPPLER_CPP_LIB}")
+    message(FATAL_ERROR "Poppler not found in third_party/poppler")
+endif()
+
+# --------------------------------------------------
+# ZXing (vendored)
+# --------------------------------------------------
+
+set(ZXING_ROOT "${PROJECT_SOURCE_DIR}/third_party/zxing")
+
+set(ZXING_INCLUDE_DIRS
+    "${ZXING_ROOT}/include"
+)
+
+set(ZXING_LIB "${ZXING_ROOT}/lib/libZXing.a")
+
+if(NOT EXISTS "${ZXING_LIB}")
+    message(FATAL_ERROR "ZXing not found in third_party/zxing")
+endif()
+
+# --------------------------------------------------
+# Source files
 # --------------------------------------------------
 
 file(GLOB_RECURSE EXTRACTOR_SOURCES
@@ -93,11 +93,9 @@ file(GLOB_RECURSE EXTRACTOR_SOURCES
     ${PROJECT_SOURCE_DIR}/src/*.cpp
 )
 
-# Add third-party implementation files explicitly
 list(APPEND EXTRACTOR_SOURCES
     ${PROJECT_SOURCE_DIR}/third_party/stb/stb_impl.cpp
 )
-
 
 # --------------------------------------------------
 # Executable
@@ -108,7 +106,7 @@ add_executable(pdf_qr_extractor
 )
 
 # --------------------------------------------------
-# Include paths
+# Include directories
 # --------------------------------------------------
 
 target_include_directories(pdf_qr_extractor
@@ -127,57 +125,37 @@ target_include_directories(pdf_qr_extractor
 target_link_libraries(pdf_qr_extractor
     PRIVATE
         Threads::Threads
-        ${POPPLER_LIBRARIES}
-        ${ZXING_LIBRARIES}
+
+        # Poppler (vendored)
+        ${POPPLER_CPP_LIB}
+        ${POPPLER_LIB}
+
+        # ZXing (vendored, static)
+        ${ZXING_LIB}
+
+        # Required for static libs
+        pthread
 )
 
 # --------------------------------------------------
-# Compiler flags from pkg-config
+# IMPORTANT: NO absolute rpath / rpath-link here
 # --------------------------------------------------
-
-target_compile_options(pdf_qr_extractor PRIVATE
-    ${POPPLER_CFLAGS_OTHER}
-    ${ZXING_CFLAGS_OTHER}
-)
+# ❌ DO NOT add:
+# -Wl,-rpath,<absolute path>
+# -Wl,-rpath-link,<absolute path>
 
 # --------------------------------------------------
-# RPATH configuration
-# Ensures extractor loads bundled libraries from ../lib
-# --------------------------------------------------
-set_target_properties(pdf_qr_extractor PROPERTIES
-    BUILD_RPATH "$ORIGIN/../lib"
-    INSTALL_RPATH "$ORIGIN/../lib"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
-# --------------------------------------------------
-# Compile definitions
-# --------------------------------------------------
-
-target_compile_definitions(pdf_qr_extractor
-    PRIVATE
-        PROJECT_VERSION="${PROJECT_VERSION}"
-        API_VERSION="${API_VERSION}"
-        BUILD_VERSION="${BUILD_VERSION}"
-)
-
-# --------------------------------------------------
-# Install targets
+# Install
 # --------------------------------------------------
 
 install(TARGETS pdf_qr_extractor
     RUNTIME DESTINATION bin
 )
 
-install(FILES pdf_qr_extractor.conf
-    DESTINATION etc/pdf_qr_extractor
-)
-
 # --------------------------------------------------
-# Build summary
+# Debug output
 # --------------------------------------------------
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "Poppler include dirs: ${POPPLER_INCLUDE_DIRS}")
-message(STATUS "Poppler libraries: ${POPPLER_LIBRARIES}")
-message(STATUS "ZXing include dirs: ${ZXING_INCLUDE_DIRS}")
-message(STATUS "ZXing libraries: ${ZXING_LIBRARIES}")
+message(STATUS "Poppler libs: ${POPPLER_CPP_LIB} ${POPPLER_LIB}")
+message(STATUS "ZXing lib: ${ZXING_LIB}")

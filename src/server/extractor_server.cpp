@@ -146,7 +146,7 @@ void ExtractorServer::handleClient(stream_protocol::socket socket)
         catch (const std::exception& e) {
             std::cerr << "[ERROR] Processing failed: " << e.what() << "\n"; 
             LOG_ERROR ("SERVER",  std::string("Processing failed: ") + e.what());
-            send_error(io, socket, QrStatus::INTERNAL_ERROR, m_cfg.m_requestTimeoutMs);
+            send_error(io, sock, QrStatus::INTERNAL_ERROR, m_cfg.m_requestTimeoutMs);
             return;
         }
         
@@ -155,14 +155,14 @@ void ExtractorServer::handleClient(stream_protocol::socket socket)
             static_cast<uint32_t>(qrResult.size())
         };
         
-        if (!write_full(io, socket,
+        if (!write_full(io, sock,
                         asio::buffer(&rh, sizeof(rh)),
                         m_cfg.m_requestTimeoutMs)) {
             return;
         }
         
         if (!qrResult.empty()) {
-            write_full(io, socket, asio::buffer(qrResult.data(), qrResult.size()), m_cfg.m_requestTimeoutMs);
+            write_full(io, sock, asio::buffer(qrResult.data(), qrResult.size()), m_cfg.m_requestTimeoutMs);
         }
         
     }
