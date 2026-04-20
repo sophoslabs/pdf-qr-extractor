@@ -1,3 +1,21 @@
+// Copyright (C) 2026 Sophos Limited
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of pdf-qr-extractor.
+//
+// pdf-qr-extractor is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// pdf-qr-extractor is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with pdf-qr-extractor. If not, see <https://www.gnu.org/licenses/>
+
 #include "logging/logger.h"
 #include <iostream>
 #include <chrono>
@@ -30,7 +48,9 @@ namespace extractor
 
         if (!m_consoleOutput)
         {
+            mode_t oldMask = umask(0077);
             m_file.open(m_filePath, std::ios::app);
+            umask(oldMask);
         }
     }
 
@@ -44,16 +64,11 @@ namespace extractor
     {
         switch (l)
         {
-        case LogLevel::DEBUG:
-            return "DEBUG";
-        case LogLevel::INFO:
-            return "INFO ";
-        case LogLevel::WARN:
-            return "WARN ";
-        case LogLevel::ERROR:
-            return "ERROR";
-        case LogLevel::FATAL:
-            return "FATAL";
+        case LogLevel::DEBUG: return "DEBUG";
+        case LogLevel::INFO:  return "INFO ";
+        case LogLevel::WARN:  return "WARN ";
+        case LogLevel::ERROR: return "ERROR";
+        case LogLevel::FATAL: return "FATAL";
         }
         return "INFO";
     }
@@ -134,8 +149,15 @@ namespace extractor
         if (m_maxSizeBytes == 0)
             return;
 
-        if (std::filesystem::file_size(m_filePath) < m_maxSizeBytes)
+        try {
+            if (std::filesystem::file_size(m_filePath) < m_maxSizeBytes)
+                return;
+        }
+        catch (const std::filesystem::filesystem_error&) {
+            // File was deleted externally — reopen it and skip rotation
+            m_file.open(m_filePath, std::ios::app);
             return;
+        }
 
         m_file.close();
 

@@ -1,3 +1,21 @@
+// Copyright (C) 2026 Sophos Limited
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of pdf-qr-extractor.
+//
+// pdf-qr-extractor is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// pdf-qr-extractor is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with pdf-qr-extractor. If not, see <https://www.gnu.org/licenses/>
+
 #include "config/extractor_config.h"
 #include "config/config.h"
 #include "logging/logger.h"
@@ -122,9 +140,9 @@ ExtractorConfig loadExtractorConfig(const std::string& path)
     
     cfg.m_maxPagesToScan = readUIntWithDefault(raw, "MAX_PDF_PAGES_FOR_QR_SCAN", DEFAULT_MAX_PDF_PAGES_FOR_QR_SCAN, 1, MAX_PDF_PAGES_FOR_QR_SCAN);
 
-    cfg.m_maxPdfSizeKiloBytes = readUIntWithDefault(raw, "MAX_PDF_QR_DECODE_KB_SIZE", DEFAULT_PDF_SIZE_QR, 1, MAX_PDF_SIZE_QR) * 1000;
+    cfg.m_maxPdfSizeBytes = readUIntWithDefault(raw, "MAX_PDF_QR_DECODE_KB_SIZE", DEFAULT_PDF_SIZE_QR, 1, MAX_PDF_SIZE_QR) * 1024;
 
-    cfg.m_maxQrImageKiloBytes = readUIntWithDefault(raw, "MAX_QR_DECODE_KB_SIZE", DEFAULT_QR_IMAGE_SIZE, 1, MAX_QR_IMAGE_SIZE) * 1000;
+    cfg.m_maxQrImageBytes = readUIntWithDefault(raw, "MAX_QR_DECODE_KB_SIZE", DEFAULT_QR_IMAGE_SIZE, 1, MAX_QR_IMAGE_SIZE) * 1024;
 
     cfg.m_workerThreads = readUIntWithDefault(raw, "WORKER_THREADS", defaultWorkerThreads, 1, cores);
     if(cfg.m_workerThreads > cores - 1)
@@ -133,13 +151,13 @@ ExtractorConfig loadExtractorConfig(const std::string& path)
         + std::to_string(cores) + "This may cause contention and increased latency under load.");
     }    
 
-    cfg.m_requestTimeoutMs = readUIntWithDefault(raw, "REQUEST_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 100, 60000);
+    cfg.m_requestTimeoutMs = readUIntWithDefault(raw, "REQUEST_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 100, 3000);
 
     cfg.m_allowedUid =  readRequiredUid(raw, "ALLOWED_UID");
 
     cfg.m_consoleOutput = readBoolWithDefault(raw, "CONSOLE_OUTPUT", false);
 
-    cfg.m_logSize = readUIntWithDefault(raw, "LOG_SIZE", DEFAULT_LOGSIZE, MIN_LOGSIZE, MAX_LOGSIZE);
+    cfg.m_logSize = readLogSize(raw);
 
      cfg.m_maxLogFiles = readUIntWithDefault(raw, "MAX_LOG_FILES", DEFAULT_LOG_MAX_FILES, 1, 50);
 
@@ -159,8 +177,6 @@ ExtractorConfig loadExtractorConfig(const std::string& path)
         LOG_ERROR ("CONFIG", "Log Level not provided in configuration file, assigning default, ERROR level");
     }
 
-    
-
     cfg.validate();
     return cfg;
 }
@@ -178,11 +194,17 @@ void ExtractorConfig::validate() const
     if (m_workerThreads == 0)
         throw std::runtime_error("Internal error: WORKER_THREADS invalid");
 
-    if (m_requestTimeoutMs == 0)
-        throw std::runtime_error("Internal error: DEFAULT_TIMEOUT_MS invalid");
-
-    if (m_maxQrImageKiloBytes == 0)
+    if (m_maxQrImageBytes == 0)
         throw std::runtime_error("Internal error: Invalid QR image size");
+
+    if (m_maxPdfSizeBytes == 0)
+        throw std::runtime_error("Internal error: Invalid PDF size");
+
+    if (m_logSize == 0)
+        throw std::runtime_error("Internal error: Invalid log size");
+
+    if(m_requestTimeoutMs == 0)
+        throw std::runtime_error("Internal error: Invalid request timeout");
 }
 
 } // namespace extractor

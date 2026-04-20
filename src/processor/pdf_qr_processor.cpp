@@ -1,5 +1,22 @@
-#include "processor/pdf_qr_processor.h"
+// Copyright (C) 2026 Sophos Limited
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of pdf-qr-extractor.
+//
+// pdf-qr-extractor is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// pdf-qr-extractor is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with pdf-qr-extractor. If not, see <https://www.gnu.org/licenses/>
 
+#include "processor/pdf_qr_processor.h"
 #include "logging/logger.h"
 
 #include <poppler-document.h>
@@ -14,8 +31,7 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 
-#include <iostream>
-#include <memory>
+#include <chrono>
 
 namespace extractor {
 
@@ -44,96 +60,199 @@ void renderPageToPng(poppler::image& image, std::vector<unsigned char>& outPng)
     );
 }
 
-} // namespace
+// Helper: deadline check
+inline bool isDeadlineExceeded(const std::chrono::steady_clock::time_point& deadline)
+{
+    return std::chrono::steady_clock::now() > deadline;
+}
 
+} // anonymous namespace
 
 PDFQRProcessor::PDFQRProcessor(const ExtractorConfig& cfg)
     : m_cfg(cfg)
 {
 }
 
-bool PDFQRProcessor::extract(const std::string& pdfData, std::string& outCombinedResult, uint64_t rid)
+ExtractResult PDFQRProcessor::extract(const std::string& pdfData,
+                                      uint64_t rid,
+                                      std::chrono::steady_clock::time_point deadline)
 {
-    outCombinedResult.clear();
+    ExtractResult result;
+    result.status = ExtractStatus::OK;
+
     std::vector<std::string> collectedQrs;
-
-    // Enforce MAX_PDF_SIZE_QR
-    if (pdfData.size() > m_cfg.m_maxPdfSizeKiloBytes) {        
-        LOG_ERROR ("PROCESSOR", "[INFO] PDF exceeds max size, skipping QR scan");
-        return true;
+   
+    // INPUT VALIDATION
+    if (pdfData.empty()) {
+        LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) + " Empty PDF input");
+        result.status = ExtractStatus::INVALID_INPUT;
+        return result;
     }
 
-    poppler::byte_array bytes(pdfData.begin(), pdfData.end());
-
-    std::unique_ptr<poppler::document> document(poppler::document::load_from_data(&bytes));
-
-    if (!document || document->is_locked()) {        
-        LOG_ERROR ("PROCESSOR", "[WARN] Unable to load PDF or PDF is locked");
-        return true;
-    }
-
-    const int totalPages = document->pages();
-
-    poppler::page_renderer renderer;
-
-    // Enforce MAX_PAGE_SINGLE_PDF
-    if (totalPages > MAX_PAGE_SINGLE_PDF) {        
-        LOG_ERROR ("PROCESSOR",  "PDF has " + std::to_string(totalPages) + " pages, exceeds max pages for single pdf= "  + std::to_string(MAX_PAGE_SINGLE_PDF)  + ", skipping QR scan");
-        return true;
+    if (pdfData.size() > m_cfg.m_maxPdfSizeBytes) {
+        LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) + " PDF exceeds max size");
+        result.status = ExtractStatus::INVALID_INPUT;
+        return result;
     }
     
-    const int pagesToScan = std::min(totalPages, static_cast<int>(m_cfg.m_maxPagesToScan));       
-
-    for (int i = 0; i < pagesToScan; ++i) {       
-        
-        std::unique_ptr<poppler::page> page(document->create_page(i));        
-        LOG_INFO("PROCESSOR", "RID=" + std::to_string(rid) + " start");
-        if (!page) {           
-            LOG_ERROR ("PROCESSOR", "[WARN] Invalid page, skipping");
-            continue;
-        }
-
-        auto rect = page->page_rect();
-        if (rect.width() > MAX_PAGE_WIDTH ||
-            rect.height() > MAX_PAGE_HEIGHT) {
-            LOG_ERROR ("PROCESSOR", "[INFO] Page dimensions exceed limits, skipping page");
-            continue;  // page auto-freed
-        }
-
-        auto image = renderer.render_page(page.get());        
-
-        if (!image.is_valid() ||
-            image.width() == 0 ||
-            image.height() == 0) {            
-            LOG_ERROR ("PROCESSOR", "[WARN] Rendered image invalid, skipping page");
-            continue;
-        }
-
-        std::vector<unsigned char> pngData;
-        renderPageToPng(image, pngData);
-
-        if (pngData.empty() ||
-            pngData.size() > m_cfg.m_maxQrImageKiloBytes) {            
-            LOG_ERROR ("PROCESSOR", "[INFO] Rendered image exceeds QR size limit, skipping");
-            continue;
-        }
-
-        // Decode ALL QR codes from this page
-        auto pageQrs = decodeQrFromImage(pngData);
-
-        for (auto& qr : pageQrs)
-            collectedQrs.push_back(std::move(qr));
+    // Processing Deadline check (early)
+    if (isDeadlineExceeded(deadline)) {
+        LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) + " Deadline exceeded before processing");
+        result.status = ExtractStatus::TIMEOUT;
+        return result;
     }
 
-    // Aggregate results (newline-delimited)
-    for (const auto& qr : collectedQrs) {
-        outCombinedResult.append(qr);
-        outCombinedResult.push_back('\n');
+    try {
+        std::unique_ptr<poppler::document> document(
+            poppler::document::load_from_raw_data(pdfData.data(),
+                                                  static_cast<int>(pdfData.size())));
+
+        if (!document) {
+            LOG_WARN("PROCESSOR", "RID=" + std::to_string(rid) + " Corrupt or unreadable PDF");
+            result.status = ExtractStatus::INVALID_INPUT;
+            return result;
+        }
+
+        if (document->is_locked()) {
+            LOG_WARN("PROCESSOR", "RID=" + std::to_string(rid) + " Password-protected PDF, skipping");
+            result.status = ExtractStatus::INVALID_INPUT;
+            return result;
+        }
+
+        const int totalPages = document->pages();
+
+        if (totalPages <= 0) {
+            LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) + " PDF has no pages");
+            result.status = ExtractStatus::INVALID_INPUT;
+            return result;
+        }
+
+        if (totalPages > MAX_PAGE_SINGLE_PDF) {
+            LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) + " PDF exceeds max pages");
+            result.status = ExtractStatus::INVALID_INPUT;
+            return result;
+        }
+
+        const int pagesToScan = std::min(
+            totalPages,
+            static_cast<int>(m_cfg.m_maxPagesToScan));
+
+        poppler::page_renderer renderer;
+
+        // Main Processing Loop 
+        for (int i = 0; i < pagesToScan; ++i) {
+
+            // DEADLINE CHECK (per page)
+            if (isDeadlineExceeded(deadline)) {
+                LOG_ERROR("PROCESSOR",
+                          "RID=" + std::to_string(rid) +
+                          " Deadline exceeded at page " + std::to_string(i));
+                result.status = ExtractStatus::TIMEOUT;
+                return result;
+            }
+
+            //auto pageStart = std::chrono::steady_clock::now();  //Intentionally commented.
+
+            std::unique_ptr<poppler::page> page(document->create_page(i));
+
+            if (!page) {
+                LOG_WARN("PROCESSOR", "RID=" + std::to_string(rid) + " Invalid page, skipping");
+                continue;
+            }
+
+            auto rect = page->page_rect();
+
+            if (rect.width() > MAX_PAGE_WIDTH ||
+                rect.height() > MAX_PAGE_HEIGHT) {
+                LOG_WARN("PROCESSOR", "RID=" + std::to_string(rid) + " Page too large, skipping");
+                continue;
+            }
+
+            // DEADLINE CHECK before render
+            if (isDeadlineExceeded(deadline)) {
+                result.status = ExtractStatus::TIMEOUT;
+                return result;
+            }
+
+            auto image = renderer.render_page(page.get());
+
+            if (!image.is_valid() ||
+                image.width() == 0 ||
+                image.height() == 0) {
+                LOG_WARN("PROCESSOR", "RID=" + std::to_string(rid) + " Invalid rendered image, skipping");
+                continue;
+            }
+
+            std::vector<unsigned char> pngData;
+            renderPageToPng(image, pngData);
+
+            if (pngData.empty() ||
+                pngData.size() > m_cfg.m_maxQrImageBytes) {
+                LOG_WARN("PROCESSOR", "RID=" + std::to_string(rid) + " Image invalid/too large, skipping");
+                continue;
+            }
+
+            // DEADLINE CHECK before ZXing
+            if (isDeadlineExceeded(deadline)) {
+                result.status = ExtractStatus::TIMEOUT;
+                return result;
+            }
+
+            auto pageQrs = decodeQrFromImage(pngData);
+
+            for (auto& qr : pageQrs) {
+                collectedQrs.push_back(std::move(qr));
+            }
+
+            //Intentionally left commented out for now - can be re-enabled if we want more granular per-page timing logs
+            // // Optional: per-page time guard (soft warning)
+            // auto pageDuration = std::chrono::steady_clock::now() - pageStart;
+
+            // if (pageDuration > std::chrono::milliseconds(500)) {
+            //     LOG_WARN("PROCESSOR",
+            //              "RID=" + std::to_string(rid) +
+            //              " Slow page processing: " +
+            //              std::to_string(
+            //                  std::chrono::duration_cast<std::chrono::milliseconds>(pageDuration).count()) +
+            //              " ms");
+            // }
+        }
+
+        // FINAL RESULT
+        if (collectedQrs.empty()) {
+            LOG_INFO("PROCESSOR", "RID=" + std::to_string(rid) + " No QR found");
+            result.status = ExtractStatus::NO_QR;
+            return result;
+        }
+
+        for (const auto& qr : collectedQrs) {
+            result.data.append(qr);
+            result.data.push_back('\n');
+        }
+
+        LOG_INFO("PROCESSOR",
+                 "RID=" + std::to_string(rid) +
+                 " QR extraction success, count=" +
+                 std::to_string(collectedQrs.size()));
+
+        result.status = ExtractStatus::OK;
+        return result;
     }
-    LOG_ERROR("PROCESSOR", "RID=" + std::to_string(rid) +  " PDF processed successfully (" + std::to_string(pdfData.size()) + ")  bytes");
-    return true;
+    catch (const std::exception& e) {
+        LOG_ERROR("PROCESSOR",
+                  "RID=" + std::to_string(rid) +
+                  " Exception: " + e.what());
+        result.status = ExtractStatus::PROCESSING_ERROR;
+        return result;
+    }
+    catch (...) {
+        LOG_ERROR("PROCESSOR",
+                  "RID=" + std::to_string(rid) +
+                  " Unknown exception");
+        result.status = ExtractStatus::PROCESSING_ERROR;
+        return result;
+    }
 }
-
 
 std::vector<std::string> PDFQRProcessor::decodeQrFromImage(const std::vector<unsigned char>& pngData)
 {

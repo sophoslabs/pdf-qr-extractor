@@ -1,4 +1,23 @@
+// Copyright (C) 2026 Sophos Limited
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of pdf-qr-extractor.
+//
+// pdf-qr-extractor is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// pdf-qr-extractor is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with pdf-qr-extractor. If not, see <https://www.gnu.org/licenses/>
+
 #include "security/security_checks.h"
+#include "logging/logger.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
@@ -7,7 +26,6 @@
 
 #include <cstring>
 #include <stdexcept>
-#include <iostream>
 
 namespace extractor::security {
 
@@ -51,13 +69,16 @@ void validateSocketDirectory(const std::string& socketPath)
         dir = socketPath.substr(0, pos);
 
     struct stat st{};
-    if (stat(dir.c_str(), &st) != 0)
+    if (lstat(dir.c_str(), &st) != 0)
         throw std::runtime_error("Socket directory does not exist");
+
+    if (S_ISLNK(st.st_mode))
+        throw std::runtime_error("Socket directory must not be a symbolic link");
 
     if (!S_ISDIR(st.st_mode))
         throw std::runtime_error("Socket path directory invalid");
 
-    if ((st.st_mode & S_IWOTH) && !(st.st_mode & S_ISVTX)) {
+    if (st.st_mode & S_IWOTH) {
         throw std::runtime_error(
             "Socket directory is world-writable and unsafe");
     }
@@ -65,9 +86,6 @@ void validateSocketDirectory(const std::string& socketPath)
 
 void enforceSingleInstance(const std::string& socketPath)
 {
-    if (access(socketPath.c_str(), F_OK) != 0)
-        return;
-
     ScopedFd sock(socket(AF_UNIX, SOCK_STREAM, 0));
     if (sock.fd < 0)
         return;
@@ -85,8 +103,7 @@ void enforceSingleInstance(const std::string& socketPath)
         throw std::runtime_error("Extractor already running");
     }
 
-    std::cerr << "[WARN] Stale socket detected, removing: "
-              << socketPath << std::endl;
+    LOG_WARN("SECURITY", "Stale socket detected, removing: " + socketPath);
 
     unlink(socketPath.c_str());
 }
@@ -106,8 +123,7 @@ void verifyPeerUid(int clientFd, uid_t allowedUid)
     }
 
     if (cred.uid != allowedUid) {
-        std::cerr << "[SECURITY] Unauthorized UID "
-                  << cred.uid << " rejected\n";
+        LOG_WARN("SECURITY", "Unauthorized UID " + std::to_string(cred.uid) + " rejected");
         throw std::runtime_error("Unauthorized client UID");
     }
 }

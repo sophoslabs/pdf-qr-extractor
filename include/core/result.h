@@ -18,39 +18,31 @@
 
 #pragma once
 
-#include <functional>
-#include <queue>
-#include <thread>
-#include <vector>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
-
+#include <string>
 namespace extractor {
 
-class WorkerPool {
-public:
-    explicit WorkerPool(size_t threadCount);
-    ~WorkerPool();
+    /**
+ * ExtractStatus
+ *
+ * Represents outcome of PDF → QR processing.
+ */
+enum class ExtractStatus {
+    OK,                 // QR(s) found
+    NO_QR,              // Valid PDF but no QR present
+    INVALID_INPUT,      // Corrupt / unsupported / invalid PDF
+    PROCESSING_ERROR,   // Internal failure (Poppler/ZXing/etc.)
+    TIMEOUT             // Processing exceeded allowed time limit
+};
 
-    // Enqueue work; returns false if pool is stopping or overloaded
-    bool enqueue(std::function<void()> task);
+/**
+ * ExtractResult
+ *
+ * Encapsulates processor output and status.
+ */
+struct ExtractResult {
+    ExtractStatus status;
+    std::string data; // newline-delimited QR results (if any)
 
-    void shutdown();
-
-private:
-
-    void workerLoop(size_t idx);
-
-private:
-    std::vector<std::thread> m_workers;
-    std::queue<std::function<void()>> m_tasks;
-
-    std::mutex m_mutex;
-    std::condition_variable m_cv;
-    std::atomic<bool> m_stopping;
-
-    size_t m_maxQueueSize;
 };
 
 } // namespace extractor

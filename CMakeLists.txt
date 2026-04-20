@@ -26,7 +26,7 @@ endif()
 
 set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
 
-# 🔥 ONLY relative path — no absolute paths
+# ONLY relative path — no absolute paths
 set(CMAKE_BUILD_RPATH "$ORIGIN/../lib")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
 
@@ -39,7 +39,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         -Wall
         -Wextra
         -Wpedantic
-        -Wconversion
         -Wno-unused-parameter
     )
 endif()
@@ -98,6 +97,16 @@ list(APPEND EXTRACTOR_SOURCES
 )
 
 # --------------------------------------------------
+# Generated headers (version)
+# --------------------------------------------------
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/include/misc/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/misc/version.h
+    @ONLY
+)
+
+# --------------------------------------------------
 # Executable
 # --------------------------------------------------
 
@@ -111,12 +120,31 @@ add_executable(pdf_qr_extractor
 
 target_include_directories(pdf_qr_extractor
     PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/include
         ${PROJECT_SOURCE_DIR}/include
+
+    SYSTEM PRIVATE
         ${PROJECT_SOURCE_DIR}/third_party/stb
         ${PROJECT_SOURCE_DIR}/third_party/asio/include
         ${POPPLER_INCLUDE_DIRS}
         ${ZXING_INCLUDE_DIRS}
 )
+
+# --------------------------------------------------
+# Target-specific compiler options
+# --------------------------------------------------
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(pdf_qr_extractor
+        PRIVATE
+            # Enable conversion warnings; ASIO/third-party headers are marked SYSTEM
+            # so their warnings are suppressed automatically without -Wno-conversion.
+            -Wconversion
+            # Explicitly suppress warnings from ASIO (handles transitive .ipp includes)
+            -isystem ${PROJECT_SOURCE_DIR}/third_party/asio/include
+    )
+
+endif()
 
 # --------------------------------------------------
 # Linking libraries
@@ -140,7 +168,7 @@ target_link_libraries(pdf_qr_extractor
 # --------------------------------------------------
 # IMPORTANT: NO absolute rpath / rpath-link here
 # --------------------------------------------------
-# ❌ DO NOT add:
+# DO NOT add:
 # -Wl,-rpath,<absolute path>
 # -Wl,-rpath-link,<absolute path>
 

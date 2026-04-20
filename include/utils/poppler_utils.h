@@ -16,41 +16,22 @@
 // You should have received a copy of the GNU General Public License
 // along with pdf-qr-extractor. If not, see <https://www.gnu.org/licenses/>
 
+/* Poppler utility file to suppress error messages during runtime */
+
 #pragma once
+#include <poppler/cpp/poppler-global.h>
 
-#include <functional>
-#include <queue>
-#include <thread>
-#include <vector>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
+namespace extractor::utils {
 
-namespace extractor {
+inline void suppressPopplerErrors(const std::string& msg, void* data)
+{
+    (void)msg;
+    (void)data;
+}
 
-class WorkerPool {
-public:
-    explicit WorkerPool(size_t threadCount);
-    ~WorkerPool();
+inline void initPoppler()
+{
+    poppler::set_debug_error_function(suppressPopplerErrors, nullptr);
+}
 
-    // Enqueue work; returns false if pool is stopping or overloaded
-    bool enqueue(std::function<void()> task);
-
-    void shutdown();
-
-private:
-
-    void workerLoop(size_t idx);
-
-private:
-    std::vector<std::thread> m_workers;
-    std::queue<std::function<void()>> m_tasks;
-
-    std::mutex m_mutex;
-    std::condition_variable m_cv;
-    std::atomic<bool> m_stopping;
-
-    size_t m_maxQueueSize;
-};
-
-} // namespace extractor
+}
