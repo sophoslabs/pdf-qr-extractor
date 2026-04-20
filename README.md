@@ -76,7 +76,7 @@ Copy and edit `pdf_qr_extractor.conf` before installation.
 | `EXTRACTOR_SOCKET_PATH`  | Unix domain socket path                  | (required)     |
 | `ALLOWED_UID`            | UID of the authorised client process     | (required)     |
 | `WORKER_THREADS`         | Number of processing threads             | ~80% of cores  |
-| `REQUEST_TIMEOUT_MS`     | Per-request deadline in milliseconds     | 500            |
+| `REQUEST_TIMEOUT_MS`     | Per-request deadline in milliseconds     | 2000           |
 | `MAX_PDF_PAGES_FOR_QR_SCAN` | Pages scanned per PDF (max 10)        | 2              |
 | `MAX_PDF_QR_DECODE_KB_SIZE` | Max PDF payload in KB (max 1024)      | 512            |
 | `MAX_QR_DECODE_KB_SIZE`  | Max rendered image size in KB (max 5120) | 512            |
