@@ -1,18 +1,42 @@
+// Copyright (C) 2026 Sophos Limited
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of pdf-qr-extractor.
+//
+// pdf-qr-extractor is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// pdf-qr-extractor is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with pdf-qr-extractor. If not, see <https://www.gnu.org/licenses/>
+
 #include "security/security_checks.h"
+#include "logging/logger.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <linux/limits.h>
 
 #include <cstring>
 #include <stdexcept>
-#include <iostream>
 
 namespace extractor::security {
 
-//1. Refuse to run as root
+struct ScopedFd {
+    int fd;
+    explicit ScopedFd(int f) : fd(f) {}
+    ~ScopedFd() {
+        if (fd >= 0) close(fd);
+    }
+};
+
 void enforceNotRoot()
 {
     if (geteuid() == 0) {
@@ -22,7 +46,6 @@ void enforceNotRoot()
     }
 }
 
-//2. Validate socket path
 void validateSocketPath(const std::string& path)
 {
     if (path.empty())
@@ -35,72 +58,72 @@ void validateSocketPath(const std::string& path)
         throw std::runtime_error("Socket path must be absolute");
 }
 
-//3. Validate socket directory security
 void validateSocketDirectory(const std::string& socketPath)
 {
     auto pos = socketPath.find_last_of('/');
-    std::string dir = socketPath.substr(0, pos);
+    std::string dir;
+
+    if (pos == std::string::npos || pos == 0)
+        dir = "/";
+    else
+        dir = socketPath.substr(0, pos);
 
     struct stat st{};
-    if (stat(dir.c_str(), &st) != 0)
+    if (lstat(dir.c_str(), &st) != 0)
         throw std::runtime_error("Socket directory does not exist");
+
+    if (S_ISLNK(st.st_mode))
+        throw std::runtime_error("Socket directory must not be a symbolic link");
 
     if (!S_ISDIR(st.st_mode))
         throw std::runtime_error("Socket path directory invalid");
 
-    // World-writable without sticky bit is dangerous
-    if ((st.st_mode & S_IWOTH) && !(st.st_mode & S_ISVTX)) {
+    if (st.st_mode & S_IWOTH) {
         throw std::runtime_error(
             "Socket directory is world-writable and unsafe");
     }
 }
 
-//4. Single-instance enforcement
 void enforceSingleInstance(const std::string& socketPath)
 {
-        if (access(socketPath.c_str(), F_OK) != 0)
-        return;
-
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
+    ScopedFd sock(socket(AF_UNIX, SOCK_STREAM, 0));
+    if (sock.fd < 0)
         return;
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (connect(fd, (sockaddr*)&addr, sizeof(addr)) == 0) {
-        close(fd);
-        throw std::runtime_error(
-            "Extractor already running");
+    std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s",
+                  socketPath.c_str());
+
+    socklen_t len = offsetof(sockaddr_un, sun_path) +
+                    std::strlen(addr.sun_path);
+
+    if (connect(sock.fd, (sockaddr*)&addr, len) == 0) {
+        throw std::runtime_error("Extractor already running");
     }
 
-    close(fd);
-
-    std::cerr << "[WARN] Stale socket detected, removing: "
-              << socketPath << std::endl;
+    LOG_WARN("SECURITY", "Stale socket detected, removing: " + socketPath);
 
     unlink(socketPath.c_str());
 }
 
-//5. Verify client UID via SO_PEERCRED
+
 void verifyPeerUid(int clientFd, uid_t allowedUid)
 {
     struct ucred cred{};
     socklen_t len = sizeof(cred);
-    
+
     if (getsockopt(clientFd,
                    SOL_SOCKET,
                    SO_PEERCRED,
                    &cred,
                    &len) != 0) {
-
         throw std::runtime_error("Failed to obtain peer credentials");
     }
 
     if (cred.uid != allowedUid) {
-        std::cerr << "[SECURITY] Unauthorized UID "
-                  << cred.uid << " rejected\n";
+        LOG_WARN("SECURITY", "Unauthorized UID " + std::to_string(cred.uid) + " rejected");
         throw std::runtime_error("Unauthorized client UID");
     }
 }

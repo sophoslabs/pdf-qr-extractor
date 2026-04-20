@@ -3,7 +3,7 @@
 ## 1. Purpose
 
 This document defines how the QR Extractor IPC protocol is versioned, evolved,
-and validated between the SASI and the extractor service.
+and validated between the Client and the extractor service.
 
 The goal is to ensure:
 
@@ -77,8 +77,8 @@ When upgrading protocol version:
 1. Increment PROTOCOL_VERSION constant.
 2. Update protocol.md.
 3. Update versioning_policy.md.
-4. Update SASI to support new version.
-5. Deploy extractor and SASI together.
+4. Update Client to support new version.
+5. Deploy extractor and Client together.
 
 Mixed-version deployments are not supported.
 
@@ -87,8 +87,8 @@ Mixed-version deployments are not supported.
 When a version mismatch occurs:
 
 - Extractor responds with VERSION_UNSUPPORTED.
-- SASI logs explicit version mismatch.
-- SASI must not retry.
+- Client logs explicit version mismatch.
+- Client must not retry.
 
 This ensures fast failure and prevents retry storms.
 

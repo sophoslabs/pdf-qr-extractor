@@ -2,7 +2,7 @@
 
 ## 1. Connection Model
 
-- The SASI daemon opens a new UNIX domain socket connection for each request.
+- The Client opens a new UNIX domain socket connection for each request.
 - Connections are not reused.
 - Each connection handles exactly one request-response cycle.
 
@@ -10,7 +10,7 @@ This avoids head-of-line blocking and simplifies concurrency.
 
 ## 2. Concurrency Model
 
-- The SASI daemon may issue multiple concurrent requests using multiple threads.
+- The Client may issue multiple concurrent requests using multiple threads.
 - The extractor accepts multiple concurrent socket connections.
 - Each request is stateless.
 - No session state is shared between requests.
@@ -75,7 +75,7 @@ Extractor logs:
 - Connection failures
 - Shutdown events
 
-SASI Daemon logs:
+Client logs:
 
 - IPC failures
 - Retry decisions

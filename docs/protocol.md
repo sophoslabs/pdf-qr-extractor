@@ -3,7 +3,7 @@
 ## 1. Overview
 
 The QR Extractor IPC protocol is a binary, framed, versioned protocol used for
-communication between the SASI and the QR Extractor service over
+communication between the Client and the QR Extractor service over
 UNIX domain sockets.
 
 The protocol is designed to be:
@@ -18,37 +18,41 @@ Each message consists of a fixed-size header followed by a variable-size payload
 ## 2. Byte Order
 
 All multi-byte integer fields use **host byte order**.  
-Both SASI and extractor run on the same system architecture.
+Both Client and extractor run on the same system architecture.
 
 ## 3. Request Format
 
 ### Request Header
 
-| Field       | Size |    Type   |          Description             |
-|------------ |------|-----------|----------------------------------|
-| magic       | 4 B  | uint32_t  | Must equal QR_MAGIC (0x51525152) |
-| version     | 4 B  | uint32_t  | Protocol version                 |
-| pdf_size    | 4 B  | uint32_t  | Size of PDF payload in bytes     |
+| Field       | Size |    Type   |          Description            |
+|------------ |------|-----------|---------------------------------|
+| magic       | 4 B  | uint32_t  | Must equal QR_MAGIC (0x51525152)|
+| version     | 4 B  | uint32_t  | Protocol version                |
+| pdf_size    | 4 B  | uint32_t  | Size of PDF payload in bytes    |
+| rid         | 8 B  | uint64_t  | Randomized Id (rid) for logging |
 
 ## 4. Response Format
 
 ### Response Header
 
-| Field     | Size | Type     | Description |
-|-----------|------|----------|-------------|
-| status    | 4 B  | uint32_t | QrStatus code |
+| Field     | Size | Type     | Description            |
+|-----------|------|----------|------------------------|
+| status    | 4 B  | uint32_t | QrStatus code          |
 | data_size | 4 B  | uint32_t | Size of result payload |
 
 
 ## 5. Status Codes
 
-| Code |       Name          |          Meaning             |
-|------|---------------------|------------------------------|
-|  0   | OK                  | Successful extraction        |
-|  1   | LIMIT_EXCEEDED      | Configured limits violated   |
-|  2   | VERSION_UNSUPPORTED | Protocol version mismatch    |
-|  3   | INVALID_REQUEST     | Corrupt or malformed request |
-|  4   | INTERNAL_ERROR      | Extractor processing failure |
+| Code |       Name          |          Meaning                          |
+|------|---------------------|-------------------------------------------|
+|  0   | OK                  | Successful extraction                     |
+|  1   | NO_QR               | PDF processed but no QR code found        |
+|  2   | LIMIT_EXCEEDED      | Configured limits violated (size/pages)   |
+|  3   | VERSION_UNSUPPORTED | Protocol version mismatch                 |
+|  4   | INVALID_REQUEST     | Corrupt or malformed request              |
+|  5   | INTERNAL_ERROR      | Extractor processing failure              |
+|  6   | TIMEOUT             | Request exceeded configured timeout       |
+|  7   | NOT_AVAILABLE       | Worker queue full, request rejected       |
 
 ## 6. Protocol Versioning
 
@@ -85,5 +89,5 @@ Older extractors will reject incompatible versions explicitly.
 
 ## 10. Design Intent
 
-This protocol provides a stable contract between SASI daemon and extractor,
+This protocol provides a stable contract between Client and extractor,
 allowing independent evolution while preserving safety and predictability.
