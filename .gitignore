@@ -21,12 +21,20 @@ include/version.h
 *.o
 *.obj
 *.so
+*.so.*
 *.dll
 *.dylib
 *.a
 *.lib
 *.exe
 *.out
+
+# ----------------------------
+# Third-party prebuilt libraries (track these)
+# ----------------------------
+!third_party/**/*.a
+!third_party/**/*.so
+!third_party/**/*.so.*
 
 # ----------------------------
 # Debug / Intermediate
