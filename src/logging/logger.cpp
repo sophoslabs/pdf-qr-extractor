@@ -78,6 +78,7 @@ namespace extractor
                  int line,
                  const std::string& component,
                  const std::string& message)
+    try
     {
         if (level < m_level)
             return;
@@ -119,6 +120,14 @@ namespace extractor
                 rotateIfNeeded();
             }
         }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[LOGGER] log() failed: " << e.what() << std::endl;
+    }
+    catch (...)
+    {
+        std::cerr << "[LOGGER] log() failed: unknown exception" << std::endl;
     }
 
     bool Logger::isLogFileValid()
@@ -163,14 +172,14 @@ namespace extractor
 
         for (int i = m_maxFiles - 1; i >= 1; --i)
         {
-            std::filesystem::rename(
-                m_filePath + "." + std::to_string(i),
-                m_filePath + "." + std::to_string(i + 1));
+            std::string src = m_filePath + "." + std::to_string(i);
+            std::string dst = m_filePath + "." + std::to_string(i + 1);
+            if (std::filesystem::exists(src))
+                std::filesystem::rename(src, dst);
         }
 
-        std::filesystem::rename(
-            m_filePath,
-            m_filePath + ".1");
+        if (std::filesystem::exists(m_filePath))
+            std::filesystem::rename(m_filePath, m_filePath + ".1");
 
         m_file.open(m_filePath, std::ios::trunc);
     }
