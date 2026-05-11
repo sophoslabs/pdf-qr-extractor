@@ -161,16 +161,23 @@ namespace extractor
 
         m_file.close();
 
-        for (int i = m_maxFiles - 1; i >= 1; --i)
+        try
         {
-            std::filesystem::rename(
-                m_filePath + "." + std::to_string(i),
-                m_filePath + "." + std::to_string(i + 1));
-        }
+            for (int i = m_maxFiles - 1; i >= 1; --i)
+            {
+                std::string src = m_filePath + "." + std::to_string(i);
+                std::string dst = m_filePath + "." + std::to_string(i + 1);
+                if (std::filesystem::exists(src))
+                    std::filesystem::rename(src, dst);
+            }
 
-        std::filesystem::rename(
-            m_filePath,
-            m_filePath + ".1");
+            if (std::filesystem::exists(m_filePath))
+                std::filesystem::rename(m_filePath, m_filePath + ".1");
+        }
+        catch (const std::filesystem::filesystem_error& e)
+        {
+            std::cerr << "[LOGGER] Log rotation failed: " << e.what() << std::endl;
+        }
 
         m_file.open(m_filePath, std::ios::trunc);
     }

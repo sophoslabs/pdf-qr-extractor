@@ -20,6 +20,7 @@
 #include "logging/logger.h"
 
 #include <chrono>
+#include <iostream>
 #include <thread>
 
 namespace extractor {
@@ -102,9 +103,11 @@ void WorkerPool::workerLoop(size_t idx)
         try {
             task();
         } catch (const std::exception& e) {
-            LOG_ERROR("WORKER", std::string("Unhandled exception: ") + e.what());
+            try { LOG_ERROR("WORKER", std::string("Unhandled exception: ") + e.what()); }
+            catch (...) { std::cerr << "[WORKER] Logger threw while reporting exception: " << e.what() << std::endl; }
         } catch (...) {
-            LOG_ERROR("WORKER", "Unknown unhandled exception");
+            try { LOG_ERROR("WORKER", "Unknown unhandled exception"); }
+            catch (...) { std::cerr << "[WORKER] Logger threw while reporting unknown exception" << std::endl; }
         }
     }
 }

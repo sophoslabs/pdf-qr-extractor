@@ -16,6 +16,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "AddressSanitizer enabled")
+
+    add_compile_options(
+        -fsanitize=address
+        -fno-omit-frame-pointer
+        -g
+    )
+
+    add_link_options(-fsanitize=address)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -56,7 +68,7 @@ find_package(Threads REQUIRED)
 set(POPPLER_ROOT "${PROJECT_SOURCE_DIR}/third_party/poppler")
 
 set(POPPLER_INCLUDE_DIRS
-    "${POPPLER_ROOT}/include/poppler"
+    "${POPPLER_ROOT}/include"
     "${POPPLER_ROOT}/include/poppler/cpp"
 )
 
