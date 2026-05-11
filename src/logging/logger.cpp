@@ -78,6 +78,7 @@ namespace extractor
                  int line,
                  const std::string& component,
                  const std::string& message)
+    try
     {
         if (level < m_level)
             return;
@@ -120,6 +121,14 @@ namespace extractor
             }
         }
     }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[LOGGER] log() failed: " << e.what() << std::endl;
+    }
+    catch (...)
+    {
+        std::cerr << "[LOGGER] log() failed: unknown exception" << std::endl;
+    }
 
     bool Logger::isLogFileValid()
     {
@@ -161,23 +170,16 @@ namespace extractor
 
         m_file.close();
 
-        try
+        for (int i = m_maxFiles - 1; i >= 1; --i)
         {
-            for (int i = m_maxFiles - 1; i >= 1; --i)
-            {
-                std::string src = m_filePath + "." + std::to_string(i);
-                std::string dst = m_filePath + "." + std::to_string(i + 1);
-                if (std::filesystem::exists(src))
-                    std::filesystem::rename(src, dst);
-            }
+            std::string src = m_filePath + "." + std::to_string(i);
+            std::string dst = m_filePath + "." + std::to_string(i + 1);
+            if (std::filesystem::exists(src))
+                std::filesystem::rename(src, dst);
+        }
 
-            if (std::filesystem::exists(m_filePath))
-                std::filesystem::rename(m_filePath, m_filePath + ".1");
-        }
-        catch (const std::filesystem::filesystem_error& e)
-        {
-            std::cerr << "[LOGGER] Log rotation failed: " << e.what() << std::endl;
-        }
+        if (std::filesystem::exists(m_filePath))
+            std::filesystem::rename(m_filePath, m_filePath + ".1");
 
         m_file.open(m_filePath, std::ios::trunc);
     }
