@@ -1,0 +1,25 @@
+[Unit]
+Description=PDF QR Extractor Service
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=pdfqr
+Group=pdfqr
+ExecStart=/opt/pdf-qr-extractor/bin/pdf_qr_extractor --config /opt/pdf-qr-extractor/config/pdf_qr_extractor.conf
+
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pdf-qr-extractor/run /opt/pdf-qr-extractor/logs
+
+[Install]
+WantedBy=multi-user.target
+
