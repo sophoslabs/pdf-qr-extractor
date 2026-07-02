@@ -17,12 +17,16 @@ cp -r "$BASE_DIR/config" "$BACKUP_DIR/" 2>/dev/null || true
 echo "Config backed up to $BACKUP_DIR"
 
 echo "Stopping service..."
-systemctl stop pdf_qr_extractor || true
-systemctl disable pdf_qr_extractor || true
+if command -v systemctl &>/dev/null && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]; then
+    systemctl stop pdf_qr_extractor || true
+    systemctl disable pdf_qr_extractor || true
+fi
 
 echo "Removing service file..."
 rm -f /etc/systemd/system/pdf_qr_extractor.service
-systemctl daemon-reload
+if command -v systemctl &>/dev/null && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]; then
+    systemctl daemon-reload
+fi
 
 echo "Removing directories..."
 rm -rf "$BASE_DIR"

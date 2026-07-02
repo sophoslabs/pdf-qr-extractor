@@ -38,8 +38,10 @@ endif()
 
 set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
 
-# ONLY relative path — no absolute paths
-set(CMAKE_BUILD_RPATH "$ORIGIN/../lib")
+# Build tree: developers can run the binary directly from the build directory
+set(CMAKE_BUILD_RPATH "${PROJECT_SOURCE_DIR}/third_party/poppler/lib")
+
+# Install tree: portable $ORIGIN-relative path for packaged distribution
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
 
 # --------------------------------------------------
